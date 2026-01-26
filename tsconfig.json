@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Node 20 + ESM + Strict",
+  "compilerOptions": {
+    /* 文件输入输出 */
+    "rootDir": "./src",
+    "outDir": "./dist",
+
+    /* 运行时环境 */
+    "target": "ES2022",               // 与 Node 20 完全对齐
+    "module": "Node16",               // 等价于 nodenext，更稳定
+    "moduleResolution": "Node16",     // 必须配合 Node16 模块解析
+    "lib": ["ES2022"],                // 运行时内置的库
+    "types": ["node"],                // 引入 @types/node 全局类型
+
+    /* 生成文件 */
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+
+    /* 严格类型检查 */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedSideEffectImports": true,
+
+    /* 模块与语法 */
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+
+    /* 其他推荐 */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
