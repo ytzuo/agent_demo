@@ -20,7 +20,6 @@ export async function runAgent(
   tools: Tool[]
 ) {
   // 1. 准备工具定义
-  // 我们需要把本地的 Tool 类型转换为 OpenAI API 需要的格式
   const functions = tools.map((t) => ({
     name: t.name,
     description: t.description,
@@ -28,73 +27,79 @@ export async function runAgent(
   }));
 
   // 2. 构建对话上下文
-  // LLM 是无状态的，每次请求都必须携带完整的对话历史
   const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     ...history,
     { role: 'user', content: userMessage },
   ];
 
-  // 3. 第一次请求 LLM (思考阶段)
-  // 我们把 functions 传给它，告诉它："你可以使用这些工具，如果需要的话请告诉我"
-  const completion = await openai.chat.completions.create({
-    model: 'gpt-3.5-turbo',
-    messages,
-    functions, // 注入能力
-    temperature: 0, // 设置为 0 让输出更确定，适合工具调用场景
-  });
+  // 设置最大循环次数，防止死循环
+  const MAX_STEPS = 5;
+  let currentStep = 0;
 
-  const choice = completion.choices[0];
-  if (!choice) {
-    throw new Error('No completion choice');
-  }
+  while (currentStep < MAX_STEPS) {
+    currentStep++;
+    console.log(`[Agent] Step ${currentStep} identifying...`);
 
-  // 4. 检查 LLM 是否决定调用函数
-  // finish_reason === 'function_call' 意味着 LLM 认为需要使用工具来回答问题
-  if (choice.finish_reason === 'function_call' && choice.message.function_call) {
-    const { name, arguments: argsStr } = choice.message.function_call;
-    
-    // 找到对应的本地工具实现
-    const tool = tools.find((t) => t.name === name);
-    if (!tool) return { reply: `No tool ${name}`, history: messages };
-
-    // 解析参数并执行代码 (行动阶段)
-    const args = JSON.parse(argsStr);
-    const output = await tool.handler(args);
-
-    // 5. 再次请求 LLM (观察与回答阶段)
-    // 关键步骤：我们要把这一轮的交互完整记录下来发回给 LLM
-    
-    // (a) 添加 LLM 之前的决定："我想调用 xxx 函数"
-    messages.push(choice.message);
-    
-    // (b) 添加函数执行的结果："调用 xxx 的结果是 yyy"
-    // role: 'function' 是专门用于告诉 LLM 工具输出的
-    messages.push({
-      role: 'function',
-      name,
-      content: JSON.stringify(output),
-    });
-
-    // (c) 让 LLM 根据这些新信息，生成给用户的最终自然语言回答
-    const second = await openai.chat.completions.create({
+    // 3. 请求 LLM
+    const completion = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo',
       messages,
+      functions,
       temperature: 0,
     });
-    const secondChoice = second.choices[0];
-    if (!secondChoice) {
-        throw new Error('No second completion choice');
+
+    const choice = completion.choices[0];
+    if (!choice) {
+      throw new Error('No completion choice');
     }
 
+    // 4. 判断 LLM 意图
+    if (choice.finish_reason === 'function_call' && choice.message.function_call) {
+      const { name, arguments: argsStr } = choice.message.function_call;
+      console.log(`[Agent] Tool Call: ${name}(${argsStr})`);
+
+      // (a) 把 AI 的"意图"加入历史 (这很重要，否则 AI 会忘记它刚才想做什么)
+      messages.push(choice.message);
+
+      // (b) 查找并执行工具
+      const tool = tools.find((t) => t.name === name);
+      let runResult;
+
+      if (!tool) {
+        runResult = { error: `Tool ${name} not found` };
+      } else {
+        try {
+          const args = JSON.parse(argsStr);
+          runResult = await tool.handler(args);
+        } catch (error: any) {
+          runResult = { error: error.message || 'Unknown error' };
+        }
+      }
+
+      console.log(`[Agent] Tool Result:`, runResult);
+
+      // (c) 把工具执行结果加入历史
+      // role: 'function' 告诉 LLM 这是之前那个函数调用的返回值
+      messages.push({
+        role: 'function',
+        name,
+        content: JSON.stringify(runResult),
+      });
+
+      // 循环继续 -> 拿着包含结果的新历史，再次询问 LLM "接下来还要做什么？"
+      continue;
+    }
+
+    // 5. 如果 finish_reason 不是 function_call，说明 LLM 已经得到了满意的结果，生成了最终文本
+    console.log(`[Agent] Final Reply: ${choice.message.content}`);
     return {
-      reply: secondChoice.message.content!,
-      history: messages, // 返回更新后的历史记录
+      reply: choice.message.content!,
+      history: messages,
     };
   }
 
-  // 如果 LLM 决定不调用工具，直接返回它的文本回复
   return {
-    reply: choice.message.content!,
+    reply: 'Sorry, I reached the maximum number of steps without finding an answer.',
     history: messages,
   };
 }
