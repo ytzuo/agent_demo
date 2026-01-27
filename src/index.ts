@@ -1,53 +1,177 @@
+import 'dotenv/config';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { runAgent } from './agent';
 import { tools } from './tools';
-import { OpenAIAdapter } from './llm/openai';
-import { DeepSeekAdapter } from './llm/deepseek';
-import 'dotenv/config';
+import { SessionManager } from './session';
+import { PersonaManager } from './persona';
+import type { Persona } from './persona';
+import { RequestQueue } from './queue';
 
 type Bindings = { history: OpenAI.Chat.ChatCompletionMessageParam[] };
 
 const app = new Hono<{ Variables: Bindings }>();
 
-// Select LLM Adapter based on environment variable
-const llm = process.env.LLM_PROVIDER === 'deepseek' 
-  ? new DeepSeekAdapter() 
-  : new OpenAIAdapter();
+const sessionManager = new SessionManager();
+const personaManager = new PersonaManager();
+const personaQueue = new RequestQueue();
 
-console.log(`[System] Using LLM Provider: ${process.env.LLM_PROVIDER || 'openai'}`);
+console.log(`[System] Agent Server Initialized`);
 
-// 简单的内存会话池（重启即丢）
-// 在生产环境中，这里通常替换为 Redis 或数据库
-// 作用：为每个用户（sessionId）维护一段独立的对话历史，让 AI 拥有"记忆"
-const sessions = new Map<string, OpenAI.Chat.ChatCompletionMessageParam[]>();
+// ---------------------------------------------------------
+// 1. 人物管理 API
+// ---------------------------------------------------------
 
+
+// 获取所有可用人物
+app.get('/personas', (c) => {
+  return c.json(personaManager.getAll());
+});
+
+// 创建新人物
+// TODO: 还需要添加持久化逻辑
+app.post('/personas', async (c) => {
+  const body = await c.req.json<Persona>();
+  if (!body.id || !body.systemPrompt) {
+    return c.json({ error: 'Missing id or systemPrompt' }, 400);
+  }
+  // 默认 provider
+  if (!body.provider) body.provider = 'openai';
+  
+  personaManager.create(body);
+  return c.json({ message: 'Persona created', persona: body });
+});
+
+// ---------------------------------------------------------
+// 2. 聊天 API (支持指定 personaId)
+// ---------------------------------------------------------
 app.post('/chat', async (c) => {
-  const body = await c.req.json<{ sessionId?: string; message: string }>();
-  const { sessionId = 'default', message } = body;
+  const body = await c.req.json<{ 
+    sessionId?: string; 
+    message: string; 
+    personaId?: string; // 指定要聊天的对象
+  }>();
+
+  const { sessionId = 'default', message, personaId = 'math-teacher' } = body;
+  
   if (!message) return c.json({ error: 'missing message' }, 400);
 
-  // 获取该用户的历史上下文
-  let history = sessions.get(sessionId) ?? [];
-  
-  // 简单的上下文窗口管理：只保留最近 6 条消息（3轮对话）
-  // 这里的考量是：
-  // 1. 节省 Token 成本
-  // 2. 防止超出 LLM 的上下文长度限制
-  if (history.length > 6) history = history.slice(-6);
+  // 获取人物设定
+  const persona = personaManager.get(personaId);
+  if (!persona) return c.json({ error: `Persona ${personaId} not found` }, 404);
 
-  // 运行 Agent
-  const { reply, history: newHistory } = await runAgent(llm, message, history, tools);
-  
-  // 保存更新后的历史
-  // 别忘了把 AI 的最新回复也追加进去
-  sessions.set(sessionId, [
-    ...newHistory,
-    { role: 'assistant', content: reply },
-  ]);
+  // 这里的 sessionId 建议组合一下，避免混淆，例如 "user-123:math-teacher"
+  // 这样同一个用户可以分别和不同的 AI 保持独立的历史
+  const effectiveSessionId = `${sessionId}:${personaId}`;
 
-  return c.json({ reply, sessionId });
+  // 获取 Session，并确保 System Prompt 是该人物的
+  const session = sessionManager.getOrCreate(effectiveSessionId, { systemPrompt: persona.systemPrompt });
+
+  // 简单的并发锁
+  if (!sessionManager.tryLock(effectiveSessionId)) {
+    return c.json({ error: 'Too many requests. Please wait.' }, 429);
+  }
+
+  try {
+    // 获取 LLM 适配器 (根据人物设定的 provider)
+    const llm = personaManager.getAdapter(persona.provider);
+
+    // 运行 Agent (使用队列进行排队保护)
+    const task = async () => {
+        // 注意：这里需要深拷贝或切片，避免副作用
+        let historyInput = [...session.history];
+        // 简单的上下文窗口
+        if (historyInput.length > 12) {
+            // 尝试保留 system prompt
+            const firstMsg = historyInput[0];
+            const recent = historyInput.slice(-10);
+            
+            if (firstMsg && firstMsg.role === 'system') {
+                historyInput = [firstMsg, ...recent];
+            } else {
+                historyInput = recent;
+            }
+        }
+
+        const { reply, history: newHistory } = await runAgent(llm, message, historyInput, tools);
+        return { reply, newHistory };
+    }
+
+    // 排队执行
+    const { reply, newHistory } = await personaQueue.enqueue(personaId, task);
+    
+    // 更新历史
+    sessionManager.updateHistory(effectiveSessionId, [
+        ...newHistory,
+        { role: 'assistant', content: reply },
+    ]);
+
+    return c.json({ 
+      reply, 
+      sessionId: effectiveSessionId, 
+      persona: persona.name,
+      queueStatus: {
+        length: personaQueue.getLength(personaId)
+      }
+    });
+  } finally {
+    sessionManager.unlock(effectiveSessionId);
+  }
+});
+
+// ---------------------------------------------------------
+// 3. 高级：两个 Agent 互相聊天 (剧场模式)
+// ---------------------------------------------------------
+app.post('/theater', async (c) => {
+  const body = await c.req.json<{ 
+    personaA: string; 
+    personaB: string; 
+    topic: string;
+    turns?: number; // 聊几轮
+  }>();
+
+  const { personaA, personaB, topic, turns = 3 } = body;
+  const agentA = personaManager.get(personaA);
+  const agentB = personaManager.get(personaB);
+
+  if (!agentA || !agentB) return c.json({ error: 'Agent not found' }, 404);
+
+  const script: any[] = [];
+  let currentMessage = `请开始关于"${topic}"的讨论。`;
+  
+  // 临时历史
+  let historyA: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: 'system', content: agentA.systemPrompt }];
+  let historyB: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: 'system', content: agentB.systemPrompt }];
+  
+  for (let i = 0; i < turns; i++) {
+    const llmA = personaManager.getAdapter(agentA.provider);
+    const llmB = personaManager.getAdapter(agentB.provider);
+
+    // --- Agent A 行动 (排队执行) ---
+    console.log(`[Theater] Round ${i+1}: ${agentA.name} is thinking...`);
+    const actionA = async () => runAgent(llmA, currentMessage, historyA, tools);
+    const resA = await personaQueue.enqueue(personaA, actionA);
+    
+    const replyA = resA.reply;
+    script.push({ speaker: agentA.name, content: replyA });
+    
+    historyA = [...resA.history, { role: 'assistant', content: replyA }];
+    currentMessage = replyA; 
+
+    // --- Agent B 行动 (排队执行) ---
+    console.log(`[Theater] Round ${i+1}: ${agentB.name} is thinking...`);
+    const actionB = async () => runAgent(llmB, currentMessage, historyB, tools);
+    const resB = await personaQueue.enqueue(personaB, actionB);
+
+    const replyB = resB.reply;
+    script.push({ speaker: agentB.name, content: replyB });
+
+    historyB = [...resB.history, { role: 'assistant', content: replyB }];
+    currentMessage = replyB;
+  }
+
+  return c.json({ topic, script });
 });
 
 const port = Number(process.env.PORT) || 3000;
