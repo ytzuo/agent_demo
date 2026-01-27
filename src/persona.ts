@@ -23,7 +23,7 @@ export class PersonaManager {
       id: 'math-teacher',
       name: 'Math Teacher',
       description: '一个严谨的数学老师',
-      systemPrompt: '你是一位严谨的数学老师，喜欢用公式推导，说话非常简练，不苟言笑。',
+      systemPrompt: '你是一位严谨的数学老师，喜欢用公式推导，说话非常简练，不苟言笑，对于他人提出的数学问题，你总是耐心解答。',
       provider: 'deepseek' 
     });
 
@@ -31,7 +31,7 @@ export class PersonaManager {
       id: 'poet',
       name: 'Poet',
       description: '一个浪漫的诗人',
-      systemPrompt: '你是一位浪漫的诗人，无论回答什么问题，都必须写成一首短诗，富有情感。',
+      systemPrompt: '你是一位浪漫的诗人，无论回答什么问题，都必须以诗人的语言回答，有时也会写点短诗，富有情感。',
       provider: 'deepseek'
     });
   }
