@@ -8,12 +8,12 @@ import type { Tool } from './types';
 export const tools: Tool[] = [
   {
     name: 'getWeather',
-    description: 'Get current weather for a city', // 描述越清晰，AI 调用越准确
+    description: 'Get current weather for a city, you need to provide the city\'s lower case english name', // 描述越清晰，AI 调用越准确
     parameters: {
       type: 'object',
       properties: {
         // 定义参数字段，AI 会尝试从用户对话中提取这些信息
-        city: { type: 'string' },
+        city: { type: 'string' },      
       },
       required: ['city'], // 必填项，如果用户没提供，AI 可能会反问用户
     },
@@ -21,6 +21,12 @@ export const tools: Tool[] = [
     handler: async ({ city }: { city: string }) => {
       // 在实际生产中，这里通常会调用第三方 API (如高德地图、OpenWeatherMap)
       // Agent 的价值就在于它可以灵活编排这些 API 调用
+      if(city.toLowerCase() === 'fuzhou') {
+        return `${city} 现在是多云，14°C`;
+      }
+      if(city.toLowerCase() === 'nanjing') {
+        return `${city} 现在是小雨，8°C`;
+      }
       return `${city} 现在是晴天，25°C`;
     },
   },
@@ -37,4 +43,15 @@ export const tools: Tool[] = [
     },
     handler: async ({ a, b }: { a: number; b: number }) => a + b,
   },
+  {
+    name: 'getCurrentTime',
+    description: 'Get the current local time', // 获取当前时间的工具
+    parameters: {
+      type: 'object',
+      properties: {},
+    },
+    handler: async () => {
+      return new Date().toLocaleString();
+    },
+  }
 ];

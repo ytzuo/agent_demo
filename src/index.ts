@@ -3,11 +3,20 @@ import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { runAgent } from './agent';
 import { tools } from './tools';
+import { OpenAIAdapter } from './llm/openai';
+import { DeepSeekAdapter } from './llm/deepseek';
 import 'dotenv/config';
 
 type Bindings = { history: OpenAI.Chat.ChatCompletionMessageParam[] };
 
 const app = new Hono<{ Variables: Bindings }>();
+
+// Select LLM Adapter based on environment variable
+const llm = process.env.LLM_PROVIDER === 'deepseek' 
+  ? new DeepSeekAdapter() 
+  : new OpenAIAdapter();
+
+console.log(`[System] Using LLM Provider: ${process.env.LLM_PROVIDER || 'openai'}`);
 
 // 简单的内存会话池（重启即丢）
 // 在生产环境中，这里通常替换为 Redis 或数据库
@@ -29,7 +38,7 @@ app.post('/chat', async (c) => {
   if (history.length > 6) history = history.slice(-6);
 
   // 运行 Agent
-  const { reply, history: newHistory } = await runAgent(message, history, tools);
+  const { reply, history: newHistory } = await runAgent(llm, message, history, tools);
   
   // 保存更新后的历史
   // 别忘了把 AI 的最新回复也追加进去
