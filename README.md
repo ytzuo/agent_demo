@@ -20,6 +20,11 @@
 ### 1. 环境准备
 
 确保你已安装 Node.js (v18+)。
+如果你还没有安装 pnpm，可以使用以下命令安装：
+
+```bash
+npm install -g pnpm
+```
 
 克隆项目并安装依赖：
 
@@ -54,13 +59,6 @@ DEEPSEEK_API_KEY=sk-your-deepseek-key-here
 
 ```bash
 pnpm run dev
-```
-
-**生产模式:**
-
-```bash
-npm run build
-npm start
 ```
 
 ## 📡 API 接口说明
