@@ -1,6 +1,9 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Tool } from './types';
+import type { LLMAdapter } from './llm/types';
+import { SessionManager } from './session';
+import { keyframes } from 'hono/css';
 
 /**
  * 为了安全起见，限制 Agent 只能访问特定的工作目录
@@ -112,5 +115,19 @@ export const tools: Tool[] = [
     handler: async () => {
       return new Date().toLocaleString();
     },
+  },
+  {
+    name: 'recallMemory',
+    description: 'Get the conversation history of the current or past messages', // 获取对话历史的工具
+    parameters: {
+      type: 'object',
+      keyword: { type: 'string', description: 'Keyword to search in past messages' },
+      limit: { type: 'number', description: 'Maximum number of results to return', default: 5 }
+    },
+    handler: async ({ keyword, limit }: { keyword: string; limit: number }) => {
+      const sessionManager = new SessionManager();
+      const memory: string[] =  await sessionManager.searchHistory(keyword, limit);
+      return memory.join('\n---\n');
+    }
   }
 ];

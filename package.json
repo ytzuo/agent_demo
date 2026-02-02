@@ -15,9 +15,13 @@
   "license": "ISC",
   "packageManager": "pnpm@10.28.1",
   "dependencies": {
+    "@types/pg": "^8.16.0",
+    "@types/uuid": "^11.0.0",
     "dotenv": "^17.2.3",
     "hono": "^4.11.5",
-    "openai": "^6.16.0"
+    "openai": "^6.16.0",
+    "pg": "^8.18.0",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@hono/node-server": "^1.19.9",

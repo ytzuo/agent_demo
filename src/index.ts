@@ -51,9 +51,10 @@ app.post('/chat', async (c) => {
     sessionId?: string; 
     message: string; 
     personaId?: string; // 指定要聊天的对象
+    needSave?: boolean;
   }>();
 
-  const { sessionId = 'default', message, personaId = 'math-teacher' } = body;
+  const { sessionId = 'default', message, personaId = 'math-teacher', needSave = false } = body;
   
   if (!message) return c.json({ error: 'missing message' }, 400);
 
@@ -106,6 +107,10 @@ app.post('/chat', async (c) => {
         ...newHistory,
         { role: 'assistant', content: reply },
     ]);
+
+    if(needSave) {
+      await sessionManager.save(session);
+    }
 
     return c.json({ 
       reply, 

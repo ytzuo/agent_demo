@@ -5,7 +5,7 @@ async function delay(ms) {
 }
 
 // 通用聊天测试函数
-async function testChat(user, message, personaId) {
+async function testChat(user, message, personaId, needSave = false) {
     console.log(`\n[${user}] 正在发送给 ${personaId}: "${message}"`);
     const start = Date.now();
     try {
@@ -15,7 +15,8 @@ async function testChat(user, message, personaId) {
             body: JSON.stringify({
                 sessionId: user,
                 message: message,
-                personaId: personaId
+                personaId: personaId,
+                needSave: needSave
             })
         });
         
@@ -45,7 +46,7 @@ async function testTheater() {
             body: JSON.stringify({
                 personaA: 'math-teacher',
                 personaB: 'poet',
-                topic: '简单探讨圆周率有什么意义',
+                topic: '今天天气怎么样？math teacher 在南京，poet 在福州。',
                 turns: 2 // 两轮对话
             })
         });
@@ -74,28 +75,32 @@ async function runTests() {
         return;
     }
 
-    console.log('=== 1. 测试基础对话 (串行) ===');
-    await testChat('user1', '你好，这也是一个测试请求', 'math-teacher');
+    // console.log('=== 1. 测试基础对话 (串行) ===');
+    // await testChat('user1', '你好，这也是一个测试请求', 'math-teacher');
 
-    console.log('\n=== 2. 测试并发排队 (并行) ===');
-    console.log('说明: 将同时发送两个请求给 math-teacher，你应该观察到其中一个需要等待另一个完成。');
+    // console.log('\n=== 2. 测试并发排队 (并行) ===');
+    // console.log('说明: 将同时发送两个请求给 math-teacher，你应该观察到其中一个需要等待另一个完成。');
     
     // 同时发起两个请求
-    const p1 = testChat('userA', '请解释量子力学（简短点）', 'math-teacher');
-    // 稍微延迟一点点，确保顺序方便观察，但要在 p1 结束前发起
-    await delay(200); 
-    const p2 = testChat('userB', '1+1等于几？', 'math-teacher');
+    const userA = 'userA'+Date.now();
+    const p1 = testChat(userA, '请解释马尔科夫链（简短点）', 'math-teacher', true);
+    // 等待 p1 完成
+    await p1;
+    //const p2 = testChat(userA, '1+1等于几？', 'math-teacher', true);
     
-    await Promise.all([p1, p2]);
+    //await Promise.all([p1, p2]);
 
-    console.log('\n=== 3. 测试不同 Persona 并发 (互不影响) ===');
-    console.log('说明: 同时请求 math-teacher 和 poet，它们应该并行处理，不需要排队。');
-    const p3 = testChat('userC', '圆周率是怎么来的？', 'math-teacher');
-    const p4 = testChat('userD', '写一首关于春天的短诗', 'poet');
-    await Promise.all([p3, p4]);
+    // console.log('\n=== 3. 测试不同 Persona 并发 (互不影响) ===');
+    // console.log('说明: 同时请求 math-teacher 和 poet，它们应该并行处理，不需要排队。');
+    // const p3 = testChat('userC', '圆周率是怎么来的？', 'math-teacher');
+    // const p4 = testChat('userD', '写一首关于春天的短诗', 'poet');
+    // await Promise.all([p3, p4]);
 
-    console.log('\n=== 4. 测试剧场模式 ===');
-    await testTheater();
+    // console.log('\n=== 4. 测试剧场模式 ===');
+    // await testTheater();
+
+    // 测试记忆获取功能
+    const p5 = testChat('userA', '帮我回忆一下我之前和你聊过的内容并简单为我总结', 'math-teacher', false);
 }
 
 runTests();
