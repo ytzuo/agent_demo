@@ -1,11 +1,70 @@
+import * as fs from 'fs/promises';
+import * as path from 'path';
 import type { Tool } from './types';
+
+/**
+ * 为了安全起见，限制 Agent 只能访问特定的工作目录
+ * 在实际生产中，这需要更严格的沙箱隔离
+ */
+const ALLOWED_ROOT = process.cwd();
 
 /** 可随意新增/删除工具，LLM 会自动选择 */
 // 这里定义了 Agent 的“技能树”。
-// 每一个对象都是一个技能，包含：
-// 1. 认知层：name/description/parameters (让 AI 知道它能做什么)
-// 2. 执行层：handler (通过代码实现真正的能力)
 export const tools: Tool[] = [
+  {
+    name: 'listFiles',
+    description: 'List files and directories in the current working directory or a subdirectory. Useful to explore the project structure.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dirPath: { type: 'string', description: 'Relative path to list. Defaults to root "."' }
+      }
+    },
+    handler: async ({ dirPath = '.' }: { dirPath?: string }) => {
+      try {
+        // 安全检查：防止目录穿越 (../..)
+        const targetPath = path.resolve(ALLOWED_ROOT, dirPath);
+        if (!targetPath.startsWith(ALLOWED_ROOT)) {
+          return `Error: Access denied. You can only access files within ${ALLOWED_ROOT}`;
+        }
+
+        const entries = await fs.readdir(targetPath, { withFileTypes: true });
+        const result = entries.map(e => e.isDirectory() ? `[DIR]  ${e.name}` : `[FILE] ${e.name}`).join('\n');
+        return result || '(Empty Directory)';
+      } catch (err: any) {
+        return `Error listing directory: ${err.message}`;
+      }
+    }
+  },
+  {
+    name: 'readFile',
+    description: 'Read the contents of a text file. Use this to analyze code or read documents.',
+    parameters: {
+      type: 'object',
+      properties: {
+        filePath: { type: 'string', description: 'Relative path to the file to read' }
+      },
+      required: ['filePath']
+    },
+    handler: async ({ filePath }: { filePath: string }) => {
+      try {
+        const targetPath = path.resolve(ALLOWED_ROOT, filePath);
+        if (!targetPath.startsWith(ALLOWED_ROOT)) {
+          return `Error: Access denied.`;
+        }
+
+        const stats = await fs.stat(targetPath);
+        if (stats.size > 10 * 1024) {
+          return `Error: File is too large (${(stats.size/1024).toFixed(2)}KB). Please read specific lines or ask user to provide summary. (Currently only full read supported in this demo)`;
+        }
+
+        const content = await fs.readFile(targetPath, 'utf-8');
+        return content;
+      } catch (err: any) {
+        return `Error reading file: ${err.message}`;
+      }
+    }
+  },
   {
     name: 'getWeather',
     description: 'Get current weather for a city, you need to provide the city\'s lower case english name', // 描述越清晰，AI 调用越准确
