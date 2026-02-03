@@ -115,9 +115,26 @@ export class RAGManager {
         `);
 
         if (res.rows.length > 0) {
-            const currentDim = res.rows[0].atttypmod - 4; // pgvector specific offset
-            if (currentDim !== expectedDim) {
-                console.warn(`[RAG] Dimension mismatch! DB: ${currentDim}, Model: ${expectedDim}. Migrating...`);
+            const atttypmod = res.rows[0].atttypmod;
+            // 注意: atttypmod 在不同版本的 PG/pgvector 中行为可能不同
+            // 通常是 dimension + 4 (存储头)，但也可能是直接 dimension
+            // 我们这里做一个宽容的检查
+            let currentDim = atttypmod;
+            if (currentDim > 4) {
+                // 尝试猜测是否包含 header
+                // 如果 atttypmod 正好是 expectedDim + 4，那肯定是带 header 的
+                // 如果 atttypmod 正好是 expectedDim，那肯定是不带 header 的
+                if (currentDim === expectedDim + 4) {
+                    currentDim = currentDim - 4;
+                }
+            }
+
+            // 更稳健的逻辑：如果我们读取到的值 (不管是原始值还是减4后的值) 都不等于预期值，才迁移
+            // 例如：如果是 1536 (不带头) 或 1540 (带头)，都视为 1536，不迁移
+            const match = (atttypmod === expectedDim) || (atttypmod === expectedDim + 4);
+
+            if (!match) {
+                console.warn(`[RAG] Dimension mismatch! DB (raw): ${atttypmod}, Expected: ${expectedDim}. Migrating...`);
                 
                 // 3. 维度不匹配，执行迁移
                 // 注意：更改维度需要清空旧数据或重新计算 (这里选择清空旧向量，保留消息内容)

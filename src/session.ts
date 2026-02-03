@@ -166,15 +166,18 @@ export class SessionManager {
       `, [conversationId, userId, title, configJson, session.history.length, summaryVectorStr]);
 
       // 2. Insert Messages (Ignore duplicates based on sequence_number)
+      // 修改: 使用 DO UPDATE 确保返回 ID 和 vector 状态，以便检查是否需要补充向量
       const query = `
         INSERT INTO messages (
           conversation_id, sequence_number, role, content, 
           tool_calls, tool_call_id, token_count
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-        ON CONFLICT (conversation_id, sequence_number) DO NOTHING
-        RETURNING id
+        ON CONFLICT (conversation_id, sequence_number) DO UPDATE 
+        SET content = EXCLUDED.content -- 强制更新以触发 RETURNING
+        RETURNING id, content_vector
       `;
 
+      // 3. 批量插入消息并异步生成向量
       for (let i = 0; i < session.history.length; i++) {
         const msg = session.history[i];
         if (!msg) continue;
@@ -207,13 +210,17 @@ export class SessionManager {
           0 
         ]);
 
-        // 如果插入成功（即不是重复的），则异步生成向量
+        // 如果插入成功或已存在，检查是否需要生成向量
         if (res.rowCount && res.rowCount > 0 && content) {
-          const newMsgId = res.rows[0].id;
-          // 异步执行，不阻塞
-          this.ragManager.indexMessage(newMsgId, content).catch(err => {
-            console.error(`[SessionManager] Async indexing failed for msg ${newMsgId}`, err);
-          });
+          const row = res.rows[0];
+          // 如果是新消息，或者旧消息没有向量，则触发索引
+          if (!row.content_vector) {
+              const newMsgId = row.id;
+              // 异步执行，不阻塞
+              this.ragManager.indexMessage(newMsgId, content).catch(err => {
+                console.error(`[SessionManager] Async indexing failed for msg ${newMsgId}`, err);
+              });
+          }
         }
       }
       console.log(`[SessionManager] Saved session ${session.id}`);
