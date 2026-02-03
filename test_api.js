@@ -83,7 +83,7 @@ async function runTests() {
     
     // 同时发起两个请求
     const userA = 'userA'+Date.now();
-    const p1 = testChat(userA, '请解释马尔科夫链（简短点）', 'math-teacher', true);
+    const p1 = testChat(userA, '简单和我聊聊AI大模型', 'poet', true);
     // 等待 p1 完成
     await p1;
     //const p2 = testChat(userA, '1+1等于几？', 'math-teacher', true);
@@ -100,7 +100,7 @@ async function runTests() {
     // await testTheater();
 
     // 测试记忆获取功能
-    const p5 = testChat('userA', '帮我回忆一下我之前和你聊过的内容并简单为我总结', 'math-teacher', false);
+    const p5 = testChat('userA', '帮我回忆一下我之前和你聊过的内容并简单为我总结', 'poet', false);
 }
 
 runTests();

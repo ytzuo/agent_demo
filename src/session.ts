@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { db, toUUID } from './db';
+import { RAGManager } from './rag';
 
 /**
  * 会话配置接口
@@ -22,6 +23,7 @@ interface Session {
 
 export class SessionManager {
   private sessions = new Map<string, Session>();
+  private ragManager = new RAGManager();
   
   // 会话过期时间 (默认 30 分钟)
   private readonly TTL = 30 * 60 * 1000; 
@@ -139,16 +141,29 @@ export class SessionManager {
     const title = session.history.find(m => m.role === 'user')?.content?.toString().slice(0, 50) || 'New Conversation';
 
     try {
+      // 生成 Title 的向量作为 summary_vector
+      let summaryVectorStr = null;
+      if (title && title !== 'New Conversation') {
+          try {
+             const vector = await this.ragManager.getEmbedding(title);
+             summaryVectorStr = `[${vector.join(',')}]`;
+          } catch (e) {
+             console.error(`[SessionManager] Failed to generate summary vector for ${session.id}`, e);
+          }
+      }
+
       // 1. Upsert Conversation
       const configJson = JSON.stringify(session.config || {});
       await db.query(`
-        INSERT INTO conversations (id, user_id, title, metadata, updated_at, message_count)
-        VALUES ($1, $2, $3, $4, NOW(), $5)
+        INSERT INTO conversations (id, user_id, title, metadata, updated_at, message_count, summary_vector)
+        VALUES ($1, $2, $3, $4, NOW(), $5, $6)
         ON CONFLICT (id) DO UPDATE SET
           updated_at = NOW(),
           message_count = $5,
-          metadata = conversations.metadata || $4
-      `, [conversationId, userId, title, configJson, session.history.length]);
+          metadata = conversations.metadata || $4,
+          summary_vector = COALESCE($6, conversations.summary_vector), -- 仅当新向量存在时更新
+          title = $3
+      `, [conversationId, userId, title, configJson, session.history.length, summaryVectorStr]);
 
       // 2. Insert Messages (Ignore duplicates based on sequence_number)
       const query = `
@@ -157,6 +172,7 @@ export class SessionManager {
           tool_calls, tool_call_id, token_count
         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (conversation_id, sequence_number) DO NOTHING
+        RETURNING id
       `;
 
       for (let i = 0; i < session.history.length; i++) {
@@ -181,7 +197,7 @@ export class SessionManager {
 
         const content = msg.content === null ? null : String(msg.content);
 
-        await db.query(query, [
+        const res = await db.query(query, [
           conversationId, 
           seq, 
           msg.role, 
@@ -190,11 +206,27 @@ export class SessionManager {
           toolCallId, 
           0 
         ]);
+
+        // 如果插入成功（即不是重复的），则异步生成向量
+        if (res.rowCount && res.rowCount > 0 && content) {
+          const newMsgId = res.rows[0].id;
+          // 异步执行，不阻塞
+          this.ragManager.indexMessage(newMsgId, content).catch(err => {
+            console.error(`[SessionManager] Async indexing failed for msg ${newMsgId}`, err);
+          });
+        }
       }
       console.log(`[SessionManager] Saved session ${session.id}`);
     } catch (err) {
       console.error(`[SessionManager] Save failed for ${session.id}`, err);
     }
+  }
+
+  /**
+   * 暴露 RAG 管理器
+   */
+  getRAG(): RAGManager {
+    return this.ragManager;
   }
 
   /**
