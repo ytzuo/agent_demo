@@ -1,6 +1,8 @@
 
 import * as crypto from 'crypto';
 
+import type { IEmbeddingAdapter } from './types';
+
 /**
  * 智谱 AI Embedding API 响应接口定义
  * 对应 API 文档: https://open.bigmodel.cn/dev/api#text_embedding
@@ -26,7 +28,7 @@ interface ZhipuResponse {
  * 由于智谱 AI 的 API 鉴权方式（自定义 JWT）与 OpenAI 不兼容，
  * 因此独立实现该适配器，而不是复用 OpenAI SDK。
  */
-export class ZhipuEmbeddingAdapter {
+export class ZhipuEmbeddingAdapter implements IEmbeddingAdapter {
   private apiKey: string;
   private baseURL: string;
   private model: string;
@@ -134,6 +136,7 @@ export class ZhipuEmbeddingAdapter {
    */
   async getEmbeddings(texts: string[]): Promise<number[][]> {
     const token = this.generateToken();
+    // 智谱 API 可能对 batch size 有限制，这里不做额外分片，假设调用方会控制
     const cleanTexts = texts.map(t => t.replace(/\n/g, ' '));
 
     const response = await fetch(`${this.baseURL}/embeddings`, {
@@ -159,7 +162,7 @@ export class ZhipuEmbeddingAdapter {
       throw new Error('[Zhipu] No embedding data returned');
     }
     
-    return data.data.map((item) => {
+    return data.data.map(item => {
         let embedding = item.embedding;
         if (embedding.length > 1536) {
             embedding = embedding.slice(0, 1536);

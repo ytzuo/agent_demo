@@ -1,6 +1,6 @@
 
 import 'dotenv/config';
-import { ZhipuEmbeddingAdapter } from './llm/zhipu-embedding';
+import { ZhipuEmbeddingAdapter } from './llm/adapters/zhipu-embedding';
 
 async function main() {
   const apiKey = process.env.ZHIPU_API_KEY;

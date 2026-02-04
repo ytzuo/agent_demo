@@ -83,7 +83,7 @@ async function runTests() {
     
     // 同时发起两个请求
     const userA = 'userA'+Date.now();
-    const p1 = testChat(userA, '简单和我聊聊互联网', 'poet', true);
+    const p1 = testChat(userA, '福州今天的天气怎么样', 'poet', true);
     // 等待 p1 完成
     await p1;
     //const p2 = testChat(userA, '1+1等于几？', 'math-teacher', true);

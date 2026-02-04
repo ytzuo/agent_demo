@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { Tool } from './types';
-import type { LLMAdapter } from './llm/types';
+import type { LLMAdapter } from './llm/adapters/types';
 import { SessionManager } from './session';
 import { keyframes } from 'hono/css';
 
@@ -84,7 +84,7 @@ export const tools: Tool[] = [
       // 在实际生产中，这里通常会调用第三方 API (如高德地图、OpenWeatherMap)
       // Agent 的价值就在于它可以灵活编排这些 API 调用
       if(city.toLowerCase() === 'fuzhou') {
-        return `${city} 现在是多云，14°C`;
+        return `${city} 现在是晴天，10~23°C`;
       }
       if(city.toLowerCase() === 'nanjing') {
         return `${city} 现在是小雨，8°C`;

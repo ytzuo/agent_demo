@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import type { Tool } from './types';
-import type { LLMAdapter } from './llm/types';
+import type { LLMAdapter } from './llm/adapters/types';
 
 /**
  * 核心 Agent 逻辑

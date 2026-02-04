@@ -1,18 +1,18 @@
 
-import OpenAI from 'openai';
-import { ZhipuEmbeddingAdapter } from './zhipu-embedding';
+import type { IEmbeddingAdapter } from './adapters/types';
+import { ZhipuEmbeddingAdapter } from './adapters/zhipu-embedding';
+import { OpenAIEmbeddingAdapter } from './adapters/openai-embedding';
 
 /**
- * 通用 Embedding 适配器
+ * 通用 Embedding 适配器 (Facade)
  * 
- * 这是一个 Facade 类，根据配置（环境变量或构造参数）自动选择具体的 Embedding 提供商。
- * 目前支持：
- * 1. OpenAI (及兼容协议，如 DeepSeek, LocalAI 等)
- * 2. Zhipu AI (GLM) - 使用自定义适配器处理鉴权
+ * 这是一个门面类，根据配置（环境变量或构造参数）自动选择并管理具体的 Embedding 适配器。
+ * 它的主要职责是：
+ * 1. 初始化逻辑：根据 provider 实例化正确的适配器
+ * 2. 统一接口：对外提供一致的调用方式
  */
-export class EmbeddingAdapter {
-  private client?: OpenAI;
-  private zhipuAdapter?: ZhipuEmbeddingAdapter;
+export class EmbeddingAdapter implements IEmbeddingAdapter {
+  private adapter: IEmbeddingAdapter;
   private model: string;
 
   /**
@@ -32,7 +32,7 @@ export class EmbeddingAdapter {
         // 初始化智谱适配器
         const key = apiKey || process.env.ZHIPU_API_KEY;
         if (!key) throw new Error('Zhipu API Key is required when provider is zhipu');
-        this.zhipuAdapter = new ZhipuEmbeddingAdapter(
+        this.adapter = new ZhipuEmbeddingAdapter(
             key, 
             baseURL || 'https://open.bigmodel.cn/api/paas/v4', 
             model
@@ -40,82 +40,34 @@ export class EmbeddingAdapter {
     } else {
         // 初始化 OpenAI 兼容适配器 (默认)
         // 支持 DeepSeek, Moonshot 等兼容 OpenAI 接口的模型
-        this.client = new OpenAI({
-            apiKey: apiKey || process.env.OPENAI_API_KEY,
-            baseURL: baseURL || process.env.OPENAI_BASE_URL,
-        });
+        const key = apiKey || process.env.OPENAI_API_KEY;
+        // 注意：OpenAI SDK 允许 apiKey 为空 (如果只是为了测试或者有其他配置方式)，但通常是需要的
+        // 如果这里不传，OpenAI SDK 内部也会尝试读环境变量
+        // 为了保持一致性，我们尽量显式传递
+        
+        this.adapter = new OpenAIEmbeddingAdapter(
+            key || '', // 如果没传且环境变量也没有，OpenAI SDK 可能会报错，这里透传空字符串让 SDK 处理或报错
+            baseURL || process.env.OPENAI_BASE_URL,
+            model
+        );
     }
-  }
-
-  /**
-   * 向量归一化 (L2 Norm)
-   * 
-   * 将向量长度归一化为 1。
-   * 许多向量数据库和相似度计算（如余弦相似度）在使用归一化向量时效率更高或更准确。
-   */
-  private normalize(vector: number[]): number[] {
-    const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-    if (norm === 0) return vector;
-    return vector.map(val => val / norm);
   }
 
   /**
    * 将单个文本转换为向量
-   * 
-   * @param text 输入文本
-   * @returns 向量数组
    */
   async getEmbedding(text: string): Promise<number[]> {
-    // 策略模式：委托给具体的适配器
-    if (this.zhipuAdapter) {
-        return this.zhipuAdapter.getEmbedding(text);
-    }
-
-    if (!this.client) throw new Error('OpenAI client is not initialized');
-
-    // 简单的预处理：去除换行，避免某些模型对换行敏感
-    const cleanText = text.replace(/\n/g, ' ');
-    
-    try {
-      const response = await this.client.embeddings.create({
-        model: this.model,
-        input: cleanText,
-        encoding_format: 'float',
-      });
-      const firstItem = response.data?.[0];
-      if (!firstItem || !firstItem.embedding) {
-        throw new Error('[Embedding] No embedding data returned');
-      }
-      return this.normalize(firstItem.embedding);
-    } catch (error) {
-      console.error('[Embedding] Failed to generate embedding:', error);
-      throw error;
-    }
+    return this.adapter.getEmbedding(text);
   }
 
   /**
    * 批量将文本转换为向量
-   * 
-   * @param texts 文本数组
-   * @returns 二维向量数组
    */
   async getEmbeddings(texts: string[]): Promise<number[][]> {
-    if (this.zhipuAdapter) {
-        return this.zhipuAdapter.getEmbeddings(texts);
+    if (this.adapter.getEmbeddings) {
+        return this.adapter.getEmbeddings(texts);
     }
-
-    if (!this.client) throw new Error('OpenAI client is not initialized');
-
-    try {
-      const response = await this.client.embeddings.create({
-        model: this.model,
-        input: texts,
-        encoding_format: 'float',
-      });
-      return response.data.map(item => this.normalize(item.embedding));
-    } catch (error) {
-      console.error('[Embedding] Failed to generate embeddings:', error);
-      throw error;
-    }
+    // Fallback: 如果适配器没实现批量接口，循环调用 (虽然目前我们的两个实现都实现了)
+    return Promise.all(texts.map(text => this.adapter.getEmbedding(text)));
   }
 }
