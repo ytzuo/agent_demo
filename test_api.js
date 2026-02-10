@@ -82,10 +82,10 @@ async function runTests() {
     // console.log('说明: 将同时发送两个请求给 math-teacher，你应该观察到其中一个需要等待另一个完成。');
     
     // 同时发起两个请求
-    const userA = 'userA'+Date.now();
-    const p1 = testChat(userA, '福州今天的天气怎么样', 'poet', true);
+    //const userA = 'userA'+Date.now();
+    //const p1 = testChat(userA, '福州今天的天气怎么样', 'poet', true);
     // 等待 p1 完成
-    await p1;
+    //await p1;
     //const p2 = testChat(userA, '1+1等于几？', 'math-teacher', true);
     
     //await Promise.all([p1, p2]);
@@ -100,7 +100,10 @@ async function runTests() {
     // await testTheater();
 
     // 测试记忆获取功能
-    const p5 = testChat('userA', '帮我回忆一下我之前和你聊过的内容并简单为我总结', 'poet', false);
+    //const p5 = testChat('userA', '帮我回忆一下我之前和你聊过的内容并简单为我总结', 'poet', false);
+
+    const p6 = testChat('userA', '帮我回忆一下和你聊过的概率论相关性最高的三个内容', 'poet', false);
+    await p6;
 }
 
 runTests();

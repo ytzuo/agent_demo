@@ -335,4 +335,36 @@ export class SessionManager {
       return [];
     }
   }
+
+  async searchBySemantic(keyword: string, limit: number = 3): Promise<string[]> {
+    try {
+      // 验证 keyword 是否为空
+      if (!keyword) {
+        return ['Error: Keyword is required.'];
+      }
+      // 验证 limit 是否为正整数
+      if (limit <= 0) {
+        return ['Error: Limit must be a positive number.'];
+      }
+      const embedding = await this.ragManager.getEmbedding(keyword);
+
+      const res = await db.query(`
+        SELECT role, content
+        FROM messages
+        WHERE content_vector IS NOT NULL
+          AND role IN ('user', 'assistant')
+        ORDER BY content_vector <=> $1::vector
+        LIMIT $2
+      `, [JSON.stringify(embedding), limit]);
+
+      if (res.rows.length > 0) {
+        return res.rows.reverse().map(row => `[Semantic Match] ${row.role}: ${row.content}`);
+      }
+      
+      return [];
+    } catch (err) {
+      console.error(`[SessionManager] Semantic search failed for keyword "${keyword}"`, err);
+      return [];
+    }
+  }
 }

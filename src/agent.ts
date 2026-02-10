@@ -43,7 +43,7 @@ export async function runAgent(
   ];
 
   // 设置最大循环次数，防止死循环
-  const MAX_STEPS = 5;
+  const MAX_STEPS = 10;
   let currentStep = 0;
 
   while (currentStep < MAX_STEPS) {

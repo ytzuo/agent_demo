@@ -122,12 +122,29 @@ export const tools: Tool[] = [
     parameters: {
       type: 'object',
       keyword: { type: 'string', description: 'Keyword to search in past messages' },
-      limit: { type: 'number', description: 'Maximum number of results to return', default: 5 }
+      limit: { type: 'number', description: 'Maximum number of results to return', default: 5 },
+      method: { type: 'string', description: 'Search method, "literal" or "semantic"', default: 'literal' }
     },
-    handler: async ({ keyword, limit }: { keyword: string; limit: number }) => {
-      const sessionManager = new SessionManager();
-      const memory: string[] =  await sessionManager.searchHistory(keyword, limit);
-      return memory.join('\n---\n');
+    handler: async ({ keyword, limit, method }: { keyword: string; limit: number; method: string }) => {
+      if (method !== 'literal' && method !== 'semantic') {
+        return 'Error: Invalid search method. Please use "literal" or "semantic".';
+      }
+      if (!keyword) {
+        return 'Error: Keyword is required.';
+      }
+      if (limit <= 0) {
+        return 'Error: Limit must be a positive number.';
+      }
+      if (method === 'semantic') {
+        const sessionManager = new SessionManager();
+        const memory: string[] =  await sessionManager.searchBySemantic(keyword, limit);
+        return memory.join('\n---\n');
+      }
+      if(method === 'literal') {
+        const sessionManager = new SessionManager();
+        const memory: string[] =  await sessionManager.searchHistory(keyword, limit);
+        return memory.join('\n---\n');
+      }
     }
   }
 ];
