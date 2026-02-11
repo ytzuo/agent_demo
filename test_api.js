@@ -102,8 +102,11 @@ async function runTests() {
     // 测试记忆获取功能
     //const p5 = testChat('userA', '帮我回忆一下我之前和你聊过的内容并简单为我总结', 'poet', false);
 
-    const p6 = testChat('userA', '帮我回忆一下和你聊过的概率论相关性最高的三个内容', 'poet', false);
-    await p6;
+    //const p6 = testChat('userA', '帮我回忆一下和你聊过的概率论相关性最高的三个内容', 'poet', false);
+    //await p6;
+
+    const p7 = testChat('userA', 'knowledge 目录下有一些关于项目的知识，请记住这些知识，再给我总结一下。', 'poet', false);
+    await p7;
 }
 
 runTests();

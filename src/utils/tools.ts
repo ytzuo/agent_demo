@@ -146,5 +146,46 @@ export const tools: Tool[] = [
         return memory.join('\n---\n');
       }
     }
+  },
+  {
+    name: 'getKnowledge',
+    description: 'Get knowledge about specific topics from the knowledge base. Use this to provide accurate information based on uploaded documents.',
+    parameters: {
+      type: 'object',
+      properties: {
+        topics: { type: 'string', description: 'The topics or questions to search for in the knowledge base.' },
+        limit: { type: 'number', description: 'Maximum number of chunks to retrieve.', default: 5 },
+      },
+      required: ['topics'],
+    },
+    handler: async ({ topics, limit }: { topics: string; limit: number }) => {
+      const sessionManager = new SessionManager();
+      const knowledge: string[] = await sessionManager.searchKnowledge(topics, limit);
+      return knowledge.join('\n---\n');
+    },
+  },
+  {
+    name: 'ingestKnowledge',
+    description: 'Read documents from the project root "knowledge/" directory and save them into the knowledge base.',
+    parameters: {
+      type: 'object',
+      properties: {
+        dirPath: { type: 'string', description: 'Relative path to the knowledge directory. Defaults to "knowledge".', default: 'knowledge' }
+      },
+    },
+    handler: async ({ dirPath = 'knowledge' }: { dirPath?: string }) => {
+      try {
+        const targetPath = path.resolve(ALLOWED_ROOT, dirPath);
+        if (!targetPath.startsWith(ALLOWED_ROOT)) {
+          return `Error: Access denied.`;
+        }
+
+        const sessionManager = new SessionManager();
+        const result = await sessionManager.ingestKnowledge(targetPath);
+        return result;
+      } catch (err: any) {
+        return `Error during ingestion: ${err.message}`;
+      }
+    }
   }
 ];

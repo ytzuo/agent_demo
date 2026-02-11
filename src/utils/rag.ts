@@ -1,12 +1,15 @@
 import { db, toUUID } from './db';
 import { EmbeddingAdapter } from '../llm/embedding';
+import * as fs from 'fs/promises';
+import * as path from 'path';
 
 export interface SearchResult {
-  id: number;
-  role: string;
+  id: string | number;
+  role?: string;
   content: string;
   similarity: number;
   createdAt: Date;
+  sourceName?: string;
 }
 
 export class RAGManager {
@@ -97,16 +100,35 @@ export class RAGManager {
     // OpenAI text-embedding-3-small: 1536
     let expectedDim = 1536; // 统一默认为 1536
     if (provider === 'zhipu' || provider === 'glm') {
-        // expectedDim = 2048; // 之前是 2048，现在用户强制要求 1536
         expectedDim = 1536;
     } else if (provider === 'deepseek') {
         expectedDim = 1024; // TODO: 确认 DeepSeek 具体模型的维度
     }
 
     try {
-        // 2. 检查当前数据库中的维度
-        // 查询 pg_attribute 获取 content_vector 列的维度
-        // atttypmod = dimension + 4 (pgvector存储头)
+        // 2. 检查知识库表的维度
+        const knowledgeRes = await db.query(`
+            SELECT atttypmod 
+            FROM pg_attribute 
+            WHERE attrelid = 'knowledge_chunks'::regclass 
+              AND attname = 'content_vector'
+        `);
+
+        if (knowledgeRes.rows.length > 0) {
+            const atttypmod = knowledgeRes.rows[0].atttypmod;
+            const match = (atttypmod === expectedDim) || (atttypmod === expectedDim + 4);
+
+            if (!match) {
+                console.warn(`[RAG] Knowledge dimension mismatch! DB (raw): ${atttypmod}, Expected: ${expectedDim}. Migrating...`);
+                await db.query(`
+                    ALTER TABLE knowledge_chunks 
+                    ALTER COLUMN content_vector TYPE vector(${expectedDim}) 
+                    USING NULL;
+                `);
+            }
+        }
+
+        // 3. 检查当前数据库中的维度 (messages 表)
         const res = await db.query(`
             SELECT atttypmod 
             FROM pg_attribute 
@@ -116,51 +138,20 @@ export class RAGManager {
 
         if (res.rows.length > 0) {
             const atttypmod = res.rows[0].atttypmod;
-            // 注意: atttypmod 在不同版本的 PG/pgvector 中行为可能不同
-            // 通常是 dimension + 4 (存储头)，但也可能是直接 dimension
-            // 我们这里做一个宽容的检查
-            let currentDim = atttypmod;
-            if (currentDim > 4) {
-                // 尝试猜测是否包含 header
-                // 如果 atttypmod 正好是 expectedDim + 4，那肯定是带 header 的
-                // 如果 atttypmod 正好是 expectedDim，那肯定是不带 header 的
-                if (currentDim === expectedDim + 4) {
-                    currentDim = currentDim - 4;
-                }
-            }
-
-            // 更稳健的逻辑：如果我们读取到的值 (不管是原始值还是减4后的值) 都不等于预期值，才迁移
-            // 例如：如果是 1536 (不带头) 或 1540 (带头)，都视为 1536，不迁移
             const match = (atttypmod === expectedDim) || (atttypmod === expectedDim + 4);
 
             if (!match) {
                 console.warn(`[RAG] Dimension mismatch! DB (raw): ${atttypmod}, Expected: ${expectedDim}. Migrating...`);
-                
-                // 3. 维度不匹配，执行迁移
-                // 注意：更改维度需要清空旧数据或重新计算 (这里选择清空旧向量，保留消息内容)
                 await db.query(`
                     ALTER TABLE messages 
                     ALTER COLUMN content_vector TYPE vector(${expectedDim}) 
                     USING NULL;
                 `);
-                console.log(`[RAG] Migration successful: content_vector converted to vector(${expectedDim})`);
-            } else {
-                console.log(`[RAG] Schema check passed: vector(${expectedDim})`);
             }
-        } else {
-            // 列不存在？或者表不存在？
-            // 如果表不存在，通常在 session.ts 或 setup 中创建
-            // 这里可以尝试添加列 (如果是老表没有向量列)
-            console.warn('[RAG] content_vector column not found, attempting to add...');
-            await db.query(`
-                ALTER TABLE messages 
-                ADD COLUMN IF NOT EXISTS content_vector vector(${expectedDim});
-            `);
         }
     } catch (error: any) {
-        // 表可能不存在，忽略错误或者记录
-        if (error.code === '42P01') { // undefined_table
-            // console.log('[RAG] Table messages does not exist yet.');
+        if (error.code === '42P01') { 
+            // 表不存在，跳过
         } else {
             console.error('[RAG] Failed to check/migrate schema:', error);
         }
@@ -176,19 +167,12 @@ export class RAGManager {
 
   /**
    * 语义检索相关的历史消息
-   * @param query 用户的问题
-   * @param conversationId 当前会话ID (用于排除当前会话或限制范围，可选)
-   * @param limit 返回条数
-   * @param threshold 相似度阈值 (0-1，越大越相似)
    */
   async searchContext(query: string, conversationId?: string, limit: number = 5, threshold: number = 0.5): Promise<SearchResult[]> {
     try {
       const vector = await this.embedding.getEmbedding(query);
       const vectorStr = `[${vector.join(',')}]`;
 
-      // 使用 pgvector 的余弦相似度 (<=>)
-      // 1 - (<=>) = 余弦相似度 (Cosine Similarity)
-      // 注意：这里假设 pgvector 扩展已启用
       const sql = `
         SELECT 
           id, 
@@ -220,13 +204,147 @@ export class RAGManager {
   }
 
   /**
+   * 从知识库中搜索知识
+   */
+  async searchKnowledge(topics: string, limit: number = 5, threshold: number = 0.4): Promise<SearchResult[]> {
+    await this.initPromise;
+    try {
+      const vector = await this.embedding.getEmbedding(topics);
+      const vectorStr = `[${vector.join(',')}]`;
+
+      const sql = `
+        SELECT 
+          kc.id, 
+          kc.content, 
+          ks.name as source_name,
+          kc.created_at,
+          1 - (kc.content_vector <=> $1) as similarity
+        FROM knowledge_chunks kc
+        JOIN knowledge_sources ks ON kc.source_id = ks.id
+        WHERE kc.content_vector IS NOT NULL
+          AND 1 - (kc.content_vector <=> $1) > $2
+        ORDER BY similarity DESC
+        LIMIT $3
+      `;
+
+      const res = await db.query(sql, [vectorStr, threshold, limit]);
+
+      return res.rows.map(row => ({
+        id: row.id,
+        content: row.content,
+        sourceName: row.source_name,
+        similarity: row.similarity,
+        createdAt: row.created_at
+      }));
+    } catch (error) {
+      console.error('[RAG] Knowledge search failed:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 从本地目录入库知识
+   */
+  async ingestKnowledge(dirPath: string): Promise<{ success: number, failed: number, errors: string[] }> {
+    await this.initPromise;
+    const stats = { success: 0, failed: 0, errors: [] as string[] };
+    
+    try {
+      const files = await fs.readdir(dirPath);
+      for (const file of files) {
+        const filePath = path.join(dirPath, file);
+        const fileStat = await fs.stat(filePath);
+        
+        if (!fileStat.isFile()) continue;
+
+        try {
+          const content = await fs.readFile(filePath, 'utf-8');
+          
+          // 1. 创建或获取 source
+          const sourceRes = await db.query(`
+            INSERT INTO knowledge_sources (name, source_type, file_path)
+            VALUES ($1, 'file', $2)
+            ON CONFLICT DO NOTHING -- 这里假设没有唯一约束，如果有可以根据 file_path 冲突处理
+            RETURNING id
+          `, [file, filePath]);
+          
+          let sourceId: string;
+          if (sourceRes.rows.length > 0) {
+            sourceId = sourceRes.rows[0].id;
+          } else {
+            // 如果没返回 ID (例如冲突)，尝试查询
+            const existing = await db.query('SELECT id FROM knowledge_sources WHERE file_path = $1', [filePath]);
+            if (existing.rows.length > 0) {
+              sourceId = existing.rows[0].id;
+              // 清理旧的 chunks
+              await db.query('DELETE FROM knowledge_chunks WHERE source_id = $1', [sourceId]);
+            } else {
+              throw new Error(`Failed to create source for ${file}`);
+            }
+          }
+
+          // 2. 切分 chunks
+          const chunks = this.chunkText(content, 1000, 200);
+          if(!chunks || chunks.length === 0) {
+            continue;
+          }
+          // 3. 批量生成向量并入库
+          for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            if (!chunk) continue;
+            
+            const chunkContent = chunk.trim();
+            if (!chunkContent) continue;
+
+            const vector = await this.embedding.getEmbedding(chunkContent);
+            const vectorStr = `[${vector.join(',')}]`;
+
+            await db.query(`
+              INSERT INTO knowledge_chunks (source_id, content, content_vector, chunk_index)
+              VALUES ($1, $2, $3, $4)
+            `, [sourceId, chunkContent, vectorStr, i]);
+          }
+
+          stats.success++;
+          console.log(`[RAG] Ingested ${file}: ${chunks.length} chunks`);
+        } catch (err: any) {
+          stats.failed++;
+          stats.errors.push(`${file}: ${err.message}`);
+          console.error(`[RAG] Failed to ingest ${file}:`, err);
+        }
+      }
+    } catch (error: any) {
+      stats.errors.push(`Directory access failed: ${error.message}`);
+    }
+
+    return stats;
+  }
+
+  /**
+   * 简单的文本切分逻辑
+   */
+  private chunkText(text: string, chunkSize: number, overlap: number): string[] {
+    const chunks: string[] = [];
+    let start = 0;
+    
+    while (start < text.length) {
+      let end = start + chunkSize;
+      if (end > text.length) end = text.length;
+      
+      chunks.push(text.slice(start, end));
+      start += (chunkSize - overlap);
+    }
+    
+    return chunks;
+  }
+
+  /**
    * 为消息生成向量并更新到数据库
-   * (通常在保存消息后异步调用)
    */
   async indexMessage(messageId: number, content: string): Promise<void> {
-    if (!content || content.length < 5) return; // 太短的内容没必要向量化
+    if (!content || content.length < 5) return; 
     
-    await this.initPromise; // 确保 Schema 已就绪
+    await this.initPromise;
 
     try {
       const vector = await this.embedding.getEmbedding(content);

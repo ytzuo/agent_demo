@@ -367,4 +367,38 @@ export class SessionManager {
       return [];
     }
   }
+
+  async searchKnowledge(topics: string, limit: number = 3): Promise<string[]> {
+    try {
+      // 验证 topics 是否为空
+      if (!topics) {
+        return ['Error: Topics are required.'];
+      }
+      // 验证 limit 是否为正整数
+      if (limit <= 0) {
+        return ['Error: Limit must be a positive number.'];
+      }
+      
+      const results = await this.ragManager.searchKnowledge(topics, limit);
+      
+      if (results.length > 0) {
+        return results.map(res => `[Knowledge] (Source: ${res.sourceName}) ${res.content}`);
+      }
+      
+      return ['No matching knowledge found.'];
+    } catch (err) {
+      console.error(`[SessionManager] Knowledge search failed for topics "${topics}"`, err);
+      return [];
+    }
+  }
+
+  async ingestKnowledge(dirPath: string): Promise<string> {
+    try {
+      const stats = await this.ragManager.ingestKnowledge(dirPath);
+      return `Ingestion complete. Success: ${stats.success}, Failed: ${stats.failed}. ${stats.errors.length > 0 ? '\nErrors:\n' + stats.errors.join('\n') : ''}`;
+    } catch (err: any) {
+      console.error(`[SessionManager] Ingestion failed`, err);
+      return `Error: ${err.message}`;
+    }
+  }
 }
