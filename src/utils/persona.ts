@@ -1,6 +1,6 @@
-import type { LLMAdapter } from './llm/adapters/types';
-import { OpenAIAdapter } from './llm/adapters/openai';
-import { DeepSeekAdapter } from './llm/adapters/deepseek';
+import type { LLMAdapter } from '../llm/adapters/types';
+import { OpenAIAdapter } from '../llm/adapters/openai';
+import { DeepSeekAdapter } from '../llm/adapters/deepseek';
 
 /**
  * 虚拟人物定义

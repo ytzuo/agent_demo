@@ -3,13 +3,13 @@ import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { runAgent } from './agent';
-import { tools } from './tools';
-import { SessionManager } from './session';
-import { PersonaManager } from './persona';
-import type { Persona } from './persona';
-import { RequestQueue } from './queue';
-import { UserProfileManager } from './user';
-import type { UserProfile } from './user';
+import { tools } from './utils/tools';
+import { SessionManager } from './utils/session';
+import { PersonaManager } from './utils/persona';
+import type { Persona } from './utils/persona';
+import { RequestQueue } from './utils/queue';
+import { UserProfileManager } from './utils/user';
+import type { UserProfile } from './utils/user';
 
 type Bindings = { history: OpenAI.Chat.ChatCompletionMessageParam[] };
 

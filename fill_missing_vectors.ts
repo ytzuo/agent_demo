@@ -1,7 +1,7 @@
 
 import 'dotenv/config';
-import { db } from './src/db';
-import { RAGManager } from './src/rag';
+import { db } from './src/utils/db';
+import { RAGManager } from './src/utils/rag';
 
 async function fillMissingVectors() {
   console.log('--- Starting Vector Backfill Script ---');

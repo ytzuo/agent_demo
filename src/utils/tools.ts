@@ -1,7 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import type { Tool } from './types';
-import type { LLMAdapter } from './llm/adapters/types';
+import type { Tool } from '../types';
+import type { LLMAdapter } from '../llm/adapters/types';
 import { SessionManager } from './session';
 import { keyframes } from 'hono/css';
 

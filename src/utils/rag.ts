@@ -1,5 +1,5 @@
 import { db, toUUID } from './db';
-import { EmbeddingAdapter } from './llm/embedding';
+import { EmbeddingAdapter } from '../llm/embedding';
 
 export interface SearchResult {
   id: number;
