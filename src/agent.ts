@@ -2,6 +2,15 @@ import OpenAI from 'openai';
 import type { Tool } from './types';
 import type { LLMAdapter } from './llm/adapters/types';
 
+const GLOBAL_PLANNING_GUIDE = `
+[Capability: Planning]
+You have the ability to manage complex tasks using the "taskPlanner" tool.
+- If a user request is multi-step or complex, you SHOULD first use "taskPlanner(action='init')" to create a plan.
+- As you complete each step, use "taskPlanner(action='update')" to record progress and results.
+- This helps you stay on track and provides transparency to the user.
+- For simple, single-turn questions, you do not need to create a plan.
+`;
+
 /**
  * 核心 Agent 逻辑
  * 这个函数展示了经典的 "Function Calling" (函数调用) 循环流程。
@@ -17,7 +26,8 @@ export async function runAgent(
   llm: LLMAdapter,
   userMessage: string,
   history: OpenAI.Chat.ChatCompletionMessageParam[],
-  tools: Tool[]
+  tools: Tool[],
+  context?: any // 传递上下文，如 sessionId, sessionManager 等
 ) {
   // 1. 准备工具定义 (使用新的 tools API)
   const toolsParam: OpenAI.Chat.ChatCompletionTool[] = tools.map((t) => ({
@@ -30,17 +40,36 @@ export async function runAgent(
   }));
 
   // 2. 构建对话上下文
+  const plan = context?.sessionManager?.getPlan(context?.sessionId);
+  const planContext = plan ? `\n\n[Current Plan]\nGoal: ${plan.goal}\nSteps:\n${plan.steps.map((s: any, i: number) => `${i}. [${s.status}] ${s.task}${s.result ? ' -> ' + s.result : ''}`).join('\n')}` : '';
+  
+  const fullInstruction = GLOBAL_PLANNING_GUIDE + planContext;
+
   // 如果历史记录中没有 System Prompt，则添加默认 Prompt
   const hasSystemPrompt = history.some(m => m.role === 'system');
   const systemPrompt: OpenAI.Chat.ChatCompletionMessageParam[] = hasSystemPrompt ? [] : [
-    { role: 'system', content: 'You are a helpful assistant. You can call tools to help answer user questions.' }
+    { role: 'system', content: 'You are a helpful assistant. You can call tools to help answer user questions.' + fullInstruction }
   ];
 
-  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+  let messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     ...systemPrompt,
     ...history,
     { role: 'user', content: userMessage },
   ];
+
+  // 如果已有 System Prompt，在其内容后追加 fullInstruction (先移除旧的 Plan Context 以防重复)
+  if (hasSystemPrompt) {
+    messages = messages.map(m => {
+      if (m.role === 'system') {
+        let content = m.content as string;
+        // 移除旧的规划能力说明和计划区块
+        content = content.replace(/\n\n\[Capability: Planning\][\s\S]*$/, '');
+        content = content.replace(/\n\n\[Current Plan\][\s\S]*$/, '');
+        return { ...m, content: content + '\n\n' + fullInstruction.trim() };
+      }
+      return m;
+    });
+  }
 
   // 设置最大循环次数，防止死循环
   const MAX_STEPS = 10;
@@ -83,7 +112,8 @@ export async function runAgent(
         } else {
           try {
             const args = JSON.parse(argsStr);
-            runResult = await tool.handler(args);
+            // 传入 context，方便工具访问会话状态
+            runResult = await tool.handler(args, context);
           } catch (error: any) {
             runResult = { error: error.message || 'Unknown error' };
           }

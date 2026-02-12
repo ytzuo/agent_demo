@@ -1,13 +1,14 @@
 import OpenAI from 'openai';
 import { db, toUUID } from './db';
 import { RAGManager } from './rag';
+import type { Plan, PlanStep } from './plan';
 
 /**
  * 会话配置接口
- * 可以在这里定义每个会话独有的设置，比如角色设定(System Prompt)、模型参数等
  */
 export interface SessionConfig {
   systemPrompt?: string;
+  enablePlanning?: boolean; // 是否开启规划功能
 }
 
 /**
@@ -19,6 +20,7 @@ interface Session {
   lastActive: number;
   config: SessionConfig;
   processing: boolean; // 简单的并发锁标志
+  plan?: Plan;         // 当前执行计划
 }
 
 export class SessionManager {
@@ -126,11 +128,42 @@ export class SessionManager {
       console.log(`[SessionManager] Cleaned up ${count} expired sessions`);
     }
   }
+/**
+   * 初始化或更新计划
+   */
+  initPlan(id: string, goal: string, steps: PlanStep[]) {
+    const session = this.sessions.get(id);
+    if (session) {
+      session.plan = {
+        goal,
+        steps,
+        createdAt: session.plan?.createdAt || Date.now(),
+        updatedAt: Date.now(),
+      };
+      session.lastActive = Date.now();
+    }
+  }
 
   /**
-   * 保存对话历史
+   * 获取当前计划
    */
-/**
+  getPlan(id: string): Plan | undefined {
+    return this.sessions.get(id)?.plan;
+  }
+
+  /**
+   * 更新计划步骤
+   */
+  updatePlanStep(id: string, index: number, update: Partial<PlanStep>) {
+    const session = this.sessions.get(id);
+    if (session && session.plan && session.plan.steps[index]) {
+      session.plan.steps[index] = { ...session.plan.steps[index], ...update };
+      session.plan.updatedAt = Date.now();
+      session.lastActive = Date.now();
+    }
+  }
+
+  /**
    * 保存对话历史 (持久化到 DB)
    */
   async save(session: Session): Promise<void> {
@@ -153,15 +186,21 @@ export class SessionManager {
       }
 
       // 1. Upsert Conversation
-      const configJson = JSON.stringify(session.config || {});
+      // 将 plan 也存入 metadata
+      const metadata = {
+        ...(session.config || {}),
+        plan: session.plan
+      };
+      const configJson = JSON.stringify(metadata);
+      
       await db.query(`
         INSERT INTO conversations (id, user_id, title, metadata, updated_at, message_count, summary_vector)
         VALUES ($1, $2, $3, $4, NOW(), $5, $6)
         ON CONFLICT (id) DO UPDATE SET
           updated_at = NOW(),
           message_count = $5,
-          metadata = conversations.metadata || $4,
-          summary_vector = COALESCE($6, conversations.summary_vector), -- 仅当新向量存在时更新
+          metadata = $4, -- 直接覆盖以包含最新的 plan
+          summary_vector = COALESCE($6, conversations.summary_vector),
           title = $3
       `, [conversationId, userId, title, configJson, session.history.length, summaryVectorStr]);
 
@@ -246,7 +285,8 @@ export class SessionManager {
       const convRes = await db.query('SELECT metadata FROM conversations WHERE id = $1', [conversationId]);
       if (convRes.rowCount === 0) return undefined;
       
-      const config = convRes.rows[0].metadata || {};
+      const metadata = convRes.rows[0].metadata || {};
+      const { plan, ...config } = metadata;
 
       // 2. Load messages
       const msgRes = await db.query(`
@@ -281,7 +321,8 @@ export class SessionManager {
         history,
         lastActive: Date.now(),
         config: config as SessionConfig,
-        processing: false
+        processing: false,
+        plan: plan as Plan
       };
       
       // Update cache

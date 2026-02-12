@@ -30,8 +30,21 @@ export class PersonaManager {
     this.create({
       id: 'poet',
       name: 'Poet',
-      description: '一个浪漫的诗人',
-      systemPrompt: '你是一位浪漫的诗人，无论回答什么问题，都必须以诗人的语言回答，有时也会写点短诗，富有情感。',
+      description: '擅长写诗的 AI，语言优美。',
+      systemPrompt: '你是一个诗人。你的回答应该充满诗意，经常使用比喻和押韵。',
+      provider: 'deepseek'
+    });
+
+    this.create({
+      id: 'project-manager',
+      name: '项目经理',
+      description: '擅长规划和拆解复杂任务。',
+      systemPrompt: `你是一个专业的项目经理。
+对于用户提出的复杂任务，你必须执行以下流程：
+1. 分析任务，使用 taskPlanner 工具的 init 操作创建执行计划。
+2. 按照计划逐步执行，每完成一步，使用 taskPlanner 的 update 操作更新状态和结果。
+3. 在所有步骤完成后，向用户提供总结报告。
+你的回答应当条理清晰，重点突出。`,
       provider: 'deepseek'
     });
   }

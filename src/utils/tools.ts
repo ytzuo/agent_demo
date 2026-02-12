@@ -187,5 +187,76 @@ export const tools: Tool[] = [
         return `Error during ingestion: ${err.message}`;
       }
     }
+  },
+  {
+    name: 'taskPlanner',
+    description: 'Manage a multi-step task plan. Use "init" to create a plan, "update" to mark progress, and "get" to view the current status.',
+    parameters: {
+      type: 'object',
+      properties: {
+        action: { 
+          type: 'string', 
+          enum: ['init', 'update', 'get'],
+          description: 'The planning action to perform.' 
+        },
+        goal: { 
+          type: 'string', 
+          description: 'Required for "init": The overall goal of the plan.' 
+        },
+        steps: {
+          type: 'array',
+          description: 'Required for "init": List of steps.',
+          items: {
+            type: 'object',
+            properties: {
+              task: { type: 'string' },
+              thought: { type: 'string' }
+            }
+          }
+        },
+        index: {
+          type: 'number',
+          description: 'Required for "update": The index of the step to update.'
+        },
+        status: {
+          type: 'string',
+          enum: ['todo', 'in_progress', 'done', 'failed'],
+          description: 'Required for "update": The new status of the step.'
+        },
+        result: {
+          type: 'string',
+          description: 'Optional for "update": The outcome or output of this step.'
+        }
+      },
+      required: ['action']
+    },
+    handler: async (args: any, context?: any) => {
+      const { sessionId, sessionManager } = context || {};
+      if (!sessionId || !sessionManager) {
+        return { error: 'Session context not available.' };
+      }
+
+      const { action, goal, steps, index, status, result } = args;
+
+      switch (action) {
+        case 'init':
+          if (!goal || !steps) return { error: 'Missing goal or steps for init.' };
+          const formattedSteps = steps.map((s: any) => ({ ...s, status: 'todo' }));
+          sessionManager.initPlan(sessionId, goal, formattedSteps);
+          return { message: 'Plan initialized.', plan: sessionManager.getPlan(sessionId) };
+        
+        case 'update':
+          if (index === undefined || !status) return { error: 'Missing index or status for update.' };
+          sessionManager.updatePlanStep(sessionId, index, { status, result });
+          return { message: 'Step updated.', plan: sessionManager.getPlan(sessionId) };
+        
+        case 'get':
+          const plan = sessionManager.getPlan(sessionId);
+          return plan ? { plan } : { message: 'No active plan found.' };
+        
+        default:
+          return { error: 'Invalid action.' };
+      }
+    }
   }
 ];

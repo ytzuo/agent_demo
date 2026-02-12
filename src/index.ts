@@ -152,7 +152,10 @@ app.post('/chat', async (c) => {
 
     // 运行 Agent (使用队列进行排队保护)
     const task = async () => {
-        const { reply, history: newHistory } = await runAgent(llm, message, historyInput, tools);
+        const { reply, history: newHistory } = await runAgent(llm, message, historyInput, tools, {
+            sessionId: effectiveSessionId,
+            sessionManager
+        });
         return { reply, newHistory };
     }
 

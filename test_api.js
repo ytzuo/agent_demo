@@ -105,8 +105,11 @@ async function runTests() {
     //const p6 = testChat('userA', '帮我回忆一下和你聊过的概率论相关性最高的三个内容', 'poet', false);
     //await p6;
 
-    const p7 = testChat('userA', 'knowledge 目录下有一些关于项目的知识，请记住这些知识，再给我总结一下。', 'poet', false);
-    await p7;
+    //const p7 = testChat('userA', 'knowledge 目录下有一些关于项目的知识，请记住这些知识，再给我总结一下。', 'poet', false);
+    //await p7;
+
+    const p8 = testChat('userA', '写一首关于我和你对话记录的短诗，不仅要包含我和你聊天内容的总结概括，还要求根据不同主题创作不同的章节，我建议你先做一个规划再开始', 'poet', false);
+    await p8;
 }
 
 runTests();

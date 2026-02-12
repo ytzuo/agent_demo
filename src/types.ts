@@ -23,6 +23,7 @@ export type Tool = {
   /**
    * 实际的执行逻辑。
    * 当 LLM 决定调用此工具时，我们会在这个回调中执行具体的 TypeScript 代码。
+   * context 包含 sessionId, sessionManager 等会话上下文
    */
-  handler: (args: any) => Promise<any>;
+  handler: (args: any, context?: any) => Promise<any>;
 };
