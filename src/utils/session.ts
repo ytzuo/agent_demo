@@ -3,18 +3,22 @@ import { db, toUUID } from './db';
 import { RAGManager } from './rag';
 import type { Plan, PlanStep } from './plan';
 
-/**
- * 会话配置接口
- */
-export interface SessionConfig {
-  systemPrompt?: string;
-  enablePlanning?: boolean; // 是否开启规划功能
+export function estimateTokens(
+  input: string | OpenAI.Chat.ChatCompletionMessageParam[],
+  mode: 'en' | 'zh' | 'mixed' = 'mixed'
+): number {
+  const text = typeof input === 'string' ? input : JSON.stringify(input);
+  const length = text.length;
+  if (mode === 'en') return Math.ceil(length / 4);
+  if (mode === 'zh') return length;
+  return Math.ceil(length / 2);
 }
 
+export interface SessionConfig {
+  systemPrompt?: string;
+  enablePlanning?: boolean;
+}
 
-/**
- * 会话数据接口
- */
 interface Session {
   id: string;
   history: OpenAI.Chat.ChatCompletionMessageParam[];
