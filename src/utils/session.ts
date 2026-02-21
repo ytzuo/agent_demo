@@ -11,6 +11,7 @@ export interface SessionConfig {
   enablePlanning?: boolean; // 是否开启规划功能
 }
 
+
 /**
  * 会话数据接口
  */
@@ -33,6 +34,64 @@ export class SessionManager {
   constructor() {
     // 启动定期清理任务
     setInterval(() => this.cleanup(), 60 * 1000); 
+  }
+
+  /**
+   * 压缩历史记录 (简单版：基于字符数估算)
+   * 策略：
+   * 1. 始终保留 System Prompt
+   * 2. 始终保留最近的 N 轮对话 (keepLastMessages)
+   * 3. 如果总长度超过限制 (maxChars)，从中间开始丢弃
+   * 4. 尝试保留最近的一次 Tool 调用链 (User -> Tool Call -> Tool Result -> Assistant)
+   */
+  compressHistory(
+    history: OpenAI.Chat.ChatCompletionMessageParam[], 
+    maxChars: number = 20000, 
+    keepLastMessages: number = 6
+  ): OpenAI.Chat.ChatCompletionMessageParam[] {
+    // 1. 提取 System Prompt
+    const systemPrompts = history.filter(m => m.role === 'system');
+    const nonSystemMessages = history.filter(m => m.role !== 'system');
+
+    // 如果总长度没超标，直接返回
+    const currentLength = JSON.stringify(history).length;
+    if (currentLength <= maxChars) {
+      return history;
+    }
+
+    console.log(`[Session] Compressing history... (Length: ${currentLength} > ${maxChars})`);
+
+    // 2. 保留最近的 N 条消息
+    // 逻辑优化：确保最近的一组 User/Assistant 完整
+    // 如果 nonSystemMessages 的最后一条是 Tool，我们需要回溯到触发它的 User Message
+    let cutIndex = nonSystemMessages.length - keepLastMessages;
+    if (cutIndex < 0) cutIndex = 0;
+    
+    let recentMessages = nonSystemMessages.slice(cutIndex);
+
+    // 检查切断点：如果切断点后的第一条消息是 tool 相关的（tool_calls 或 tool 结果），说明我们可能把上下文切断了
+    // 简单起见，如果切出来的第一条是 'tool' 或 'assistant' 且带有 tool_calls，我们尝试多保留几条，直到找到 user message
+    while (recentMessages.length > 0 && (recentMessages[0]!=undefined) &&
+          (recentMessages[0].role === 'tool' || (recentMessages[0].role === 'assistant' && recentMessages[0].tool_calls))) {
+       // 说明切到了工具调用的中间，尝试回溯
+       cutIndex--;
+       if (cutIndex < 0) {
+          // 已经回溯到头了，说明整个历史都是关联的，或者无法找到头
+          recentMessages = nonSystemMessages;
+          break;
+       }
+       recentMessages = nonSystemMessages.slice(cutIndex);
+    }
+    
+    // 3. 构建新的历史
+    const compressedHistory = [
+      ...systemPrompts,
+      // 插入一条提示，说明有中间对话被省略
+      { role: 'system', content: '[System Note: Some earlier conversation history has been summarized or truncated to save context window.]' } as OpenAI.Chat.ChatCompletionMessageParam,
+      ...recentMessages
+    ];
+
+    return compressedHistory;
   }
 
   /**

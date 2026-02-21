@@ -133,19 +133,10 @@ app.post('/chat', async (c) => {
        });
     }
 
-    // 1. 上下文窗口截断 (简单的滑动窗口)
+    // 1. 上下文窗口截断 (使用新的压缩逻辑)
     // ----------------------------------------------------------------
-    if (historyInput.length > 12) {
-        // 尝试保留 system prompt (现在已经是注入了 context 的版本)
-        const firstMsg = historyInput[0];
-        const recent = historyInput.slice(-10);
-        
-        if (firstMsg && firstMsg.role === 'system') {
-            historyInput = [firstMsg, ...recent];
-        } else {
-            historyInput = recent;
-        }
-    }
+    // 20000 字符大约对应 4000-5000 tokens，对于大多数模型是安全的
+    historyInput = sessionManager.compressHistory(historyInput, 20000, 10);
 
     // 获取 LLM 适配器 (根据人物设定的 provider)
     const llm = personaManager.getAdapter(persona.provider);
